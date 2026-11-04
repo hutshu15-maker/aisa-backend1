@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AISA Live Chat Test</title>
+    <style>
+        :root {
+            --primary-color: #387dff;
+            --bg-color: #f4f7f6;
+            --chat-bg: #ffffff;
+            --text-color: #333333;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        #aisa-chat-container {
+            width: 100%;
+            max-width: 400px;
+            height: 600px;
+            max-height: calc(100vh - 40px);
+            background: var(--chat-bg);
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #aisa-chat-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 15px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        #aisa-chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        .message.user {
+            background: var(--primary-color);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 2px;
+        }
+        .message.assistant {
+            background: #e9ecef;
+            color: var(--text-color);
+            align-self: flex-start;
+            border-bottom-left-radius: 2px;
+        }
+        .message.assistant a {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        .message.error {
+            background: #fdecea;
+            color: #8a1c13;
+        }
+        .message.loading {
+            color: #777;
+            font-style: italic;
+        }
+        #aisa-chat-input-container {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid #eee;
+            background: #fff;
+        }
+        #aisa-chat-input {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 10px;
+            outline: none;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+        }
+        #aisa-chat-input:focus {
+            border-color: var(--primary-color);
+        }
+        #aisa-send-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0 16px;
+            margin-left: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #aisa-send-btn:disabled {
+            background: #ccc;
+            cursor: default;
+        }
+    </style>
+</head>
+<body>
+
+<div id="aisa-chat-container">
+    <div id="aisa-chat-header">Digitaler Assistent</div>
+    <div id="aisa-chat-messages" aria-live="polite">
+        <div class="message assistant">Willkommen! Schön, dass Sie da sind. Wie kann ich Ihnen heute helfen?</div>
+    </div>
+    <form id="aisa-chat-input-container">
+        <textarea id="aisa-chat-input" rows="1" maxlength="2000"
+                  placeholder="Schreiben Sie eine Nachricht..." aria-label="Nachricht"></textarea>
+        <button id="aisa-send-btn" type="submit">Senden</button>
+    </form>
+</div>
+
+<script>
+    // Relativer Pfad: Die Seite wird vom selben Express-Server ausgeliefert,
+    // dadurch gibt es keine CORS-Probleme. Läuft das Frontend auf einer anderen
+    // Domain, hier die volle URL eintragen und die Domain in ALLOWED_ORIGINS erlauben.
+    const BACKEND_URL = '/api/chat';
+    const MAX_HISTORY = 38; // Backend erlaubt max. 40 Nachrichten im Verlauf
+
+    const inputEl = document.getElementById('aisa-chat-input');
+    const sendBtn = document.getElementById('aisa-send-btn');
+    const messagesContainer = document.getElementById('aisa-chat-messages');
+    const formEl = document.getElementById('aisa-chat-input-container');
+
+    let chatHistory = [];
+    let isSending = false;
+
+    async function sendMessage() {
+        const messageText = inputEl.value.trim();
+        if (!messageText || isSending) return;
+
+        isSending = true;
+        appendMessage(messageText, 'user');
+        inputEl.value = '';
+        inputEl.disabled = true;
+        sendBtn.disabled = true;
+
+        const loadingEl = appendMessage('Schreibt …', 'assistant loading');
+
+        try {
+            const response = await fetch(BACKEND_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: messageText,
+                    chatHistory: chatHistory.slice(-MAX_HISTORY)
+                })
+            });
+
+            const data = await response.json().catch(() => ({}));
+            loadingEl.remove();
+
+            if (response.ok && data.reply) {
+                appendMessage(data.reply, 'assistant');
+                chatHistory.push({ role: 'user', content: messageText });
+                chatHistory.push({ role: 'assistant', content: data.reply });
+            } else {
+                appendMessage(data.error || 'Entschuldigung, es gab einen Fehler im System.', 'assistant error');
+                inputEl.value = messageText; // Nachricht nicht verlieren
+            }
+        } catch (error) {
+            loadingEl.remove();
+            appendMessage('Verbindung zum Server fehlgeschlagen.', 'assistant error');
+            inputEl.value = messageText;
+            console.error('Error:', error);
+        } finally {
+            isSending = false;
+            inputEl.disabled = false;
+            sendBtn.disabled = false;
+            inputEl.focus();
+        }
+    }
+
+    // Text sicher einfügen (kein innerHTML) und URLs als klickbare Links darstellen,
+    // damit z. B. der Calendly-Link direkt angeklickt werden kann.
+    function appendMessage(text, classes) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'message ' + classes;
+
+        const urlPattern = /https?:\/\/[^\s<>"]+/g;
+        let lastIndex = 0;
+        for (const match of text.matchAll(urlPattern)) {
+            let url = match[0].replace(/[.,;:!?)\]]+$/, ''); // Satzzeichen am Ende abschneiden
+            msgEl.append(text.slice(lastIndex, match.index));
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            msgEl.append(link);
+            lastIndex = match.index + url.length;
+        }
+        msgEl.append(text.slice(lastIndex));
+
+        messagesContainer.appendChild(msgEl);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return msgEl;
+    }
+
+    formEl.addEventListener('submit', function (e) {
+        e.preventDefault();
+        sendMessage();
+    });
+
+    // Enter sendet, Shift+Enter macht einen Zeilenumbruch
+    inputEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+</script>
+
+</body>
+</html>
